@@ -1,0 +1,7 @@
+#!/bin/sh
+
+python3 cliff_generator.py 3 --cpp --cpp_header=c3_0.hpp --cpp_type=double --cpp_namespace=cliff
+
+g++ -O2 --std=c++11 -Wall -Wextra test.cpp -o test
+
+./test
