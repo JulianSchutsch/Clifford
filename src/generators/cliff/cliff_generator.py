@@ -1,7 +1,14 @@
 import argumentparser
 import blades
+import os
 
 CPP_INDENT = 2
+
+def ensurePath(fn):
+  dirName = os.path.dirname(fn)
+  if not os.path.exists(dirName):
+    os.makedirs(dirName)
+  return fn
 
 class CPPWriter:
     def __init__(self, filename):
@@ -23,7 +30,7 @@ class CPPWriter:
         self.__indent = self.__indentStack.pop()
 
     def __enter__(self):
-        self.__file = open(self.__filename, "w+")
+        self.__file = open(ensurePath(self.__filename), "w+")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -112,6 +119,29 @@ def generateCpp_Blades(bladeGroup, settings, writer):
         writer.write("typedef %s Blade%i[%i];"%(settings.cpp_type, index, bladeGroup.bladeLengths[index]))
     return
 
+def generateCpp_Subtractions(bladeGroup, writer):
+    for blade in bladeGroup.iter():
+        structName = typePrefix+blade.name()
+        for partnerBlade in bladeGroup.iter():
+            sumBlade = blade+partnerBlade
+            sumName = typePrefix+sumBlade.name()
+            writer.write("constexpr %s %s::operator - (const %s& r){"%(sumName, structName, typePrefix+partnerBlade.name()))
+            writer.indent(CPP_INDENT)
+            def sum():
+                for index in range(bladeGroup.bladeCount):
+                    if blade.hasBlade(index):
+                        if partnerBlade.hasBlade(index):
+                            yield ", ".join(["v%i[%i]-r.v%i[%i]"%(index, e, index, e) for e in range(bladeGroup.bladeLengths[index])])
+                        else:
+                            yield ", ".join(["v%i[%i]"%(index, e) for e in range(bladeGroup.bladeLengths[index])])
+                    else:
+                        if partnerBlade.hasBlade(index):
+                            yield ", ".join(["-r.v%i[%i]"%(index, e) for e in range(bladeGroup.bladeLengths[index])])
+            writer.write("return %s(%s);"%(sumName, ", ".join(s for s in sum())))
+            writer.unindent()
+            writer.write("}")
+    return
+
 def generateCpp_Additions(bladeGroup, writer):
     for blade in bladeGroup.iter():
         structName = typePrefix+blade.name()
@@ -168,6 +198,7 @@ def generateCpp(settings):
             generateCpp_Blades(bladeGroup, settings, writer)
             generateCpp_ForwardDeclarations(bladeGroup, writer)
             generateCpp_Classes(bladeGroup, writer)
+            generateCpp_Subtractions(bladeGroup, writer)
             generateCpp_Additions(bladeGroup, writer)
             generateCpp_Multiplications(bladeGroup, writer)
 
