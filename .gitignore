@@ -1,0 +1,6 @@
+*.cmake
+*.cbp
+CMakeCache.txt
+Makefile
+*~
+*.layout

@@ -15,6 +15,7 @@ def parseArguments():
 
     parser.add_argument('elements', type=int, nargs=1, help='Number of basis elements')
     parser.add_argument('--metric', type=str, nargs=1, help='Metric, format [a11 a12..., a21 a22..., ...]')
+    parser.add_argument('--bladescript', type=str, nargs=1, help='Script to describe the blades to be generated')
     parser.add_argument('--cpp', action='store_true', help='Generate C++ files')
     parser.add_argument('--cpp_header', type=str, nargs=1, help="C++ header file name")
     parser.add_argument('--cpp_type', type=str, nargs=1, help="C++ basis type")
@@ -51,6 +52,7 @@ def parseArguments():
     settings.elementCount = elementCount
     settings.metric = metric
     settings.generate_cpp = args.cpp
+    settings.bladeScript = args.bladescript[0] if args.bladescript else None
     settings.cpp_header = args.cpp_header[0]
     settings.cpp_type = args.cpp_type[0]
     if not settings.cpp_type:

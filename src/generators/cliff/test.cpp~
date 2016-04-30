@@ -1,12 +1,14 @@
 #include <iostream>
+#include <typeinfo>
 #include "c3_0.hpp"
 
 int main(int argc, char** args)
 {
   (void)argc;
   (void)args;
-//  auto y=cliff::GFTFF(0,1,0)+cliff::GFFTF(1,0,0);
-  auto y=cliff::GFTF(0,1)+cliff::GFFT(1)
-  std::cout<<"Result:"<<y.str()<<std::endl;
+  auto a=cliff::GFTF(1,0,0);
+  auto b=cliff::GFTF(0,1,0);
+  auto y=a*b;
+  std::cout<<a.str()<<"*"<<b.str()<<"="<<y.str()<<std::endl;
   return 0;
 }

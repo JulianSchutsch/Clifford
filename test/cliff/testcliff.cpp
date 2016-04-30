@@ -7,10 +7,12 @@
 
 BOOST_AUTO_TEST_CASE(checkCliff)
 {
-  cliff::GTFFF v1(2);
-  cliff::GFTFF v2(1,0,0);
-  cliff::GTTFF v3(2,1,0,0);
-  cliff::GFTFF v4(2,0,0);
-  BOOST_CHECK(v1+v2==v3);
-  BOOST_CHECK(v1*v2==v4);
+  const auto e=cliff::e;
+  const auto e1=cliff::e1;
+  auto v1 = 2*e;
+  auto v2 = e1;
+  auto v3 = 2*e+e1;
+  auto v4 = 2*e1;
+  BOOST_CHECK((v1+v2).approxEqual(v3));
+  BOOST_CHECK((v1*v2).approxEqual(v4));
 }

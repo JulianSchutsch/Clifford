@@ -6,7 +6,7 @@ CPP_INDENT = 2
 
 def ensurePath(fn):
   dirName = os.path.dirname(fn)
-  if not os.path.exists(dirName):
+  if dirName!="" and not os.path.exists(dirName):
     os.makedirs(dirName)
   return fn
 
@@ -97,6 +97,22 @@ def generateCpp_Classes(bladeGroup, writer):
             writer.write("return result.str();")
             writer.unindent()
             writer.write("}")
+
+            writer.write("bool hasBlade(unsigned int blade){")
+            writer.indent(CPP_INDENT)
+            writer.write("switch(blade){")
+            writer.indent(CPP_INDENT)
+            for index in blade.iterActive():
+                writer.write("case %i:"%index)
+            writer.indent(CPP_INDENT)
+            writer.write("return true;")
+            writer.unindent()
+            writer.unindent()
+            writer.write("}")
+            writer.write("return false;")
+            writer.unindent()
+            writer.write("}")
+            writer.write("constexpr %s operator * (const %s factor);" % (structName, settings.cpp_type));
             writer.write("constexpr %s(%s)"%(structName, ", ".join(["%s p%i_%i"%(settings.cpp_type, i, e) for i,e in blade.iterElements()])))
             lineStart = ":"
             for i in blade.iterActive():
@@ -111,12 +127,35 @@ def generateCpp_Classes(bladeGroup, writer):
                 mulBlade = blade*partnerBlade
                 mulName = typePrefix+mulBlade.name()
                 writer.write("constexpr %s operator + (const %s& r);"%(sumName, typePrefix+partnerBlade.name()))
+                writer.write("constexpr %s operator - (const %s& r);"%(sumName, typePrefix+partnerBlade.name()))
                 writer.write("constexpr %s operator * (const %s& r);"%(mulName, typePrefix+partnerBlade.name()))
+                writer.write("bool approxEqual (const %s& r);"%(typePrefix+partnerBlade.name()))
     return
 
 def generateCpp_Blades(bladeGroup, settings, writer):
     for index in range(bladeGroup.bladeCount):
         writer.write("typedef %s Blade%i[%i];"%(settings.cpp_type, index, bladeGroup.bladeLengths[index]))
+    return
+
+def generateCpp_ApproxEqual(bladeGroup, writer):
+    for blade in bladeGroup.iter():
+        structName = typePrefix+blade.name()
+        for partnerBlade in bladeGroup.iter():
+            writer.write("bool %s::approxEqual (const %s& r){"%(structName, typePrefix+partnerBlade.name()))
+            writer.indent(CPP_INDENT)
+            def sum():
+                for index in range(bladeGroup.bladeCount):
+                    if blade.hasBlade(index):
+                        if partnerBlade.hasBlade(index):
+                            yield " && ".join(["(fabs(v%i[%i]-r.v%i[%i])<epsilon)"%(index, e, index, e) for e in range(bladeGroup.bladeLengths[index])])
+                        else:
+                            yield " && ".join(["(fabs(v%i[%i])<epsilon)"%(index, e) for e in range(bladeGroup.bladeLengths[index])])
+                    else:
+                        if partnerBlade.hasBlade(index):
+                            yield "&& ".join(["(fabs(r.v%i[%i])<epsilon)"%(index, e) for e in range(bladeGroup.bladeLengths[index])])
+            writer.write("return %s;"%(" && ".join(s for s in sum())))
+            writer.unindent()
+            writer.write("}")
     return
 
 def generateCpp_Subtractions(bladeGroup, writer):
@@ -137,6 +176,9 @@ def generateCpp_Subtractions(bladeGroup, writer):
                     else:
                         if partnerBlade.hasBlade(index):
                             yield ", ".join(["-r.v%i[%i]"%(index, e) for e in range(bladeGroup.bladeLengths[index])])
+                        else:
+                            if sumBlade.hasBlade(index):
+                                yield ", ".join("0" for e in range(bladeGroup.bladeLengths[index]))
             writer.write("return %s(%s);"%(sumName, ", ".join(s for s in sum())))
             writer.unindent()
             writer.write("}")
@@ -160,6 +202,9 @@ def generateCpp_Additions(bladeGroup, writer):
                     else:
                         if partnerBlade.hasBlade(index):
                             yield ", ".join(["r.v%i[%i]"%(index, e) for e in range(bladeGroup.bladeLengths[index])])
+                        else:
+                            if sumBlade.hasBlade(index):
+                                yield ", ".join("0" for e in range(bladeGroup.bladeLengths[index]))
             writer.write("return %s(%s);"%(sumName, ", ".join(s for s in sum())))
             writer.unindent()
             writer.write("}")
@@ -183,17 +228,49 @@ def generateCpp_Multiplications(bladeGroup, writer):
                             def valid(index1, index2):
                                 return blade.hasBlade(index1) and partnerBlade.hasBlade(index2)
                             r= " + ".join(["%sv%i[%i]*r.v%i[%i]"%("" if factor==1 else str(factor)+"*", index1, element1, index2, element2) for index1, element1, index2, element2, factor in list if valid(index1, index2)])
-                            yield r
+                            yield (r if r!="" else "0")
             writer.write("return %s(%s);"%(mulName, ", ".join(m for m in mul())))
             writer.unindent()
             writer.write("}")
     return
 
+def generateCpp_ScalarMultiplication(bladeGroup, writer, settings):
+    for blade in bladeGroup.iter():
+        structName = typePrefix+blade.name()
+        writer.write("constexpr %s %s::operator * (const %s factor){"%(structName, structName, settings.cpp_type));
+        writer.indent(CPP_INDENT);
+        mulStr = ", ".join(["factor*v%i[%i]"%(i, e) for i, e in blade.iterElements()])
+        writer.write("return %s(%s);"%(structName, mulStr))
+        writer.unindent();
+        writer.write("}")
+        writer.write("constexpr %s operator * (const %s factor, const %s& multivector){"%(structName, settings.cpp_type, structName))
+        writer.indent(CPP_INDENT);
+        writer.write("return multivector*factor;")
+        writer.unindent()
+        writer.write("}")
+
+def generateElements(bladeGroup, writer):
+    for index in range(bladeGroup.bladeCount):
+        bladesType = bladeGroup.indexToBladesType(index)
+        bladesTypeName = bladesType.name()
+        bladeLength = bladeGroup.bladeLengths[index]
+        for element in range(bladeLength):
+            elementName = bladeGroup.elementStr(index, element)
+            initStr = ", ".join([("1" if e==element else "0") for e in range(bladeLength)])
+            writer.write("static const %s%s %s(%s);"%(typePrefix, bladesTypeName, elementName, initStr))
+    return
+
+def generateMirror(bladeGroup, writer):
+    return
+
 def generateCpp(settings):
-    bladeGroup = blades.BladeGroup(settings.elementCount, settings.metric)
+    bladeGroup = blades.BladeGroup(settings.elementCount, settings.metric, settings.bladeScript)
     with CPPWriter(settings.cpp_header) as writer:
         writer.write("#include <string>")
         writer.write("#include <sstream>")
+        writer.write("#include <cmath>")
+        writer.write("#include <limits>")
+        writer.write("static const %s epsilon = std::numeric_limits<%s>::epsilon();"%(settings.cpp_type, settings.cpp_type));
         with CPPNamespace(writer, settings.cpp_namespace):
             generateCpp_Blades(bladeGroup, settings, writer)
             generateCpp_ForwardDeclarations(bladeGroup, writer)
@@ -201,6 +278,9 @@ def generateCpp(settings):
             generateCpp_Subtractions(bladeGroup, writer)
             generateCpp_Additions(bladeGroup, writer)
             generateCpp_Multiplications(bladeGroup, writer)
+            generateCpp_ApproxEqual(bladeGroup, writer)
+            generateCpp_ScalarMultiplication(bladeGroup, writer, settings)
+            generateElements(bladeGroup, writer)
 
 try:
     settings = argumentparser.parseArguments()
