@@ -1,4 +1,3 @@
-enableBladesTypeOfLength(1)
-enableBladesType([True, True, True, True])
-enableBladesType([True, False, True, False])
+enableMultivectorTypesOfLength(1)
+enableMultivectorType([True, False, True, False])
 

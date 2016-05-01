@@ -1,6 +1,6 @@
 import argumentparser
-import blades
 import os
+import clifford
 
 CPP_INDENT = 2
 
@@ -72,199 +72,201 @@ class CPPStruct:
 
 typePrefix = "G"
 
-def generateCpp_ForwardDeclarations(bladeGroup, writer):
-    for blade in bladeGroup.iter():
-        writer.write("class %s;"%(typePrefix+blade.name()))
+def generateCpp_ForwardDeclarations(group, writer):
+    for multivectorType in group.iterMultivectorTypes():
+        writer.write("class %s;"%(typePrefix+multivectorType.name()))
     return
 
-def generateCpp_Classes(bladeGroup, writer):
-    for blade in bladeGroup.iter():
-        structName = typePrefix+blade.name()
-        with CPPStruct(writer, structName, asClass=True) as struct:
-            for index in blade.iterActive():
-                writer.write("Blade%i v%i;"%(index, index))
-            for friendBlade in bladeGroup.iter():
-                if not blade.equal(friendBlade):
-                    writer.write("friend class G%s;"%(friendBlade.name()))
-            struct.public()
-            writer.write("std::string str(){")
-            writer.indent(CPP_INDENT)
-            writer.write("std::stringstream result;")
-            first = True
-            for index, element in blade.iterElements():
-                writer.write('if(v%i[%i]!=0) result<<'%(index, element)+'(result.tellp()==0?"":"+")<<'+'v%i[%i]<<"%s";'%(index, element, bladeGroup.elementStr(index, element)))
-                first= False
-            writer.write("return result.str();")
-            writer.unindent()
-            writer.write("}")
+def generateCpp_Classes(group, writer):
 
-            writer.write("bool hasBlade(unsigned int blade){")
-            writer.indent(CPP_INDENT)
-            writer.write("switch(blade){")
-            writer.indent(CPP_INDENT)
-            for index in blade.iterActive():
-                writer.write("case %i:"%index)
-            writer.indent(CPP_INDENT)
-            writer.write("return true;")
-            writer.unindent()
-            writer.unindent()
-            writer.write("}")
-            writer.write("return false;")
-            writer.unindent()
-            writer.write("}")
-            writer.write("constexpr %s operator * (const %s factor);" % (structName, settings.cpp_type));
-            writer.write("constexpr %s(%s)"%(structName, ", ".join(["%s p%i_%i"%(settings.cpp_type, i, e) for i,e in blade.iterElements()])))
+    def generateFunc_Str(multivectorType):
+        writer.write("std::string str(){")
+        writer.indent(CPP_INDENT)
+        writer.write("std::stringstream result;")
+        for blade, bladeElement in multivectorType.iterElements():
+            writer.write('if(v%i[%i]!=0) result<<' % (
+            blade, bladeElement) + '(result.tellp()==0?"":"+")<<' + 'v%i[%i]<<"%s";' % (
+                         blade, bladeElement, group.elementStr(blade, bladeElement)))
+        writer.write("return result.str();")
+        writer.unindent()
+        writer.write("}")
+        return
+
+    def generateFunc_HasBlade(multivectorType):
+        writer.write("bool hasBlade(unsigned int blade){")
+        writer.indent(CPP_INDENT)
+        writer.write("switch(blade){")
+        writer.indent(CPP_INDENT)
+        for index in multivectorType.iterEnabled():
+            writer.write("case %i:" % index)
+        writer.indent(CPP_INDENT)
+        writer.write("return true;")
+        writer.unindent()
+        writer.unindent()
+        writer.write("}")
+        writer.write("return false;")
+        writer.unindent()
+        writer.write("}")
+        return
+
+    def generateOperators(multivectorTypeA):
+        multivectorA = multivectorTypeA.generateMultivector("v%blade%[%bladeElement%]")
+        for multivectorTypeB in group.iterMultivectorTypes():
+            multivectorB = multivectorTypeB.generateMultivector("other.v%blade%[%bladeElement%]")
+            typeNameB = typePrefix+multivectorTypeB.name()
+
+            sum = multivectorA + multivectorB
+            sumType = sum.getMultivectorType()
+            sumTypeName = typePrefix + sumType.name()
+
+            mul = multivectorA * multivectorB
+            mulType = mul.getMultivectorType()
+            mulTypeName = typePrefix + mulType.name()
+
+            writer.write("constexpr %s operator + (const %s& r);" % (sumTypeName, typeNameB))
+            writer.write("constexpr %s operator - (const %s& r);" % (sumTypeName, typeNameB))
+            writer.write("constexpr %s operator * (const %s& r);" % (mulTypeName, typeNameB))
+            writer.write("bool approxEqual (const %s& r);" %typeNameB)
+        return
+
+    for multivectorType in group.iterMultivectorTypes():
+        typeName = typePrefix + multivectorType.name()
+        with CPPStruct(writer, typeName, asClass=True) as struct:
+            for index in multivectorType.iterEnabled():
+                writer.write("Blade%i v%i;"%(index, index))
+            for friendVectorType in group.iterMultivectorTypes():
+                if not multivectorType.equal(friendVectorType):
+                    friendVectorName = typePrefix + friendVectorType.name()
+                    writer.write("friend class %s;"%friendVectorName)
+            struct.public()
+            generateFunc_Str(multivectorType)
+            generateFunc_HasBlade(multivectorType)
+            writer.write("constexpr %s operator * (const %s factor);" % (typeName, settings.cpp_type));
+            writer.write("constexpr %s(%s)"%(typeName, ", ".join(["%s p%i_%i"%(settings.cpp_type, i, e) for i,e in multivectorType.iterElements()])))
             lineStart = ":"
-            for i in blade.iterActive():
-                writer.write("%s v%i{%s}"%(lineStart, i, ", ".join(["p%i_%i"%(i, e) for e in range(bladeGroup.bladeLengths[i])])))
+            for i in multivectorType.iterEnabled():
+                writer.write("%s v%i{%s}"%(lineStart, i, ", ".join(["p%i_%i"%(i, e) for e in range(group.bladeLengths[i])])))
                 lineStart = ","
             writer.write('{}')
-            for index in blade.iterActive():
+            for index in multivectorType.iterEnabled():
                 writer.write("Blade%i& blade%i() {return v%i;}"%(index, index, index))
-            for partnerBlade in bladeGroup.iter():
-                sumBlade = blade+partnerBlade
-                sumName = typePrefix+sumBlade.name()
-                mulBlade = blade*partnerBlade
-                mulName = typePrefix+mulBlade.name()
-                writer.write("constexpr %s operator + (const %s& r);"%(sumName, typePrefix+partnerBlade.name()))
-                writer.write("constexpr %s operator - (const %s& r);"%(sumName, typePrefix+partnerBlade.name()))
-                writer.write("constexpr %s operator * (const %s& r);"%(mulName, typePrefix+partnerBlade.name()))
-                writer.write("bool approxEqual (const %s& r);"%(typePrefix+partnerBlade.name()))
+            generateOperators(multivectorType)
     return
 
-def generateCpp_Blades(bladeGroup, settings, writer):
-    for index in range(bladeGroup.bladeCount):
-        writer.write("typedef %s Blade%i[%i];"%(settings.cpp_type, index, bladeGroup.bladeLengths[index]))
+def generateCpp_Blades(group, settings, writer):
+    for index in range(group.bladeCount):
+        writer.write("typedef %s Blade%i[%i];"%(settings.cpp_type, index, group.bladeLengths[index]))
     return
 
-def generateCpp_ApproxEqual(bladeGroup, writer):
-    for blade in bladeGroup.iter():
-        structName = typePrefix+blade.name()
-        for partnerBlade in bladeGroup.iter():
-            writer.write("bool %s::approxEqual (const %s& r){"%(structName, typePrefix+partnerBlade.name()))
+def generateCpp_ApproxEqual(group, writer):
+    for multivectorTypeA in group.iterMultivectorTypes():
+        multivectorA = multivectorTypeA.generateMultivector("v%blade%[%bladeElement%]")
+        typeNameA = typePrefix + multivectorTypeA.name()
+        for multivectorTypeB in group.iterMultivectorTypes():
+            multivectorB = multivectorTypeB.generateMultivector("other.v%blade%[%bladeElement%]")
+            typeNameB = typePrefix + multivectorTypeB.name()
+
+            diff = multivectorB - multivectorA
+            diffType = diff.getMultivectorType()
+            equalCalc = " && ".join(["fabs(%s)<epsilon"%str(diff.getCoefficient(i)) for i in diffType.iterElements()])
+
+            writer.write("bool %s::approxEqual (const %s& other){"%(typeNameA, typeNameB))
             writer.indent(CPP_INDENT)
-            def sum():
-                for index in range(bladeGroup.bladeCount):
-                    if blade.hasBlade(index):
-                        if partnerBlade.hasBlade(index):
-                            yield " && ".join(["(fabs(v%i[%i]-r.v%i[%i])<epsilon)"%(index, e, index, e) for e in range(bladeGroup.bladeLengths[index])])
-                        else:
-                            yield " && ".join(["(fabs(v%i[%i])<epsilon)"%(index, e) for e in range(bladeGroup.bladeLengths[index])])
-                    else:
-                        if partnerBlade.hasBlade(index):
-                            yield "&& ".join(["(fabs(r.v%i[%i])<epsilon)"%(index, e) for e in range(bladeGroup.bladeLengths[index])])
-            writer.write("return %s;"%(" && ".join(s for s in sum())))
+            writer.write("return %s;"%equalCalc)
             writer.unindent()
             writer.write("}")
     return
 
-def generateCpp_Subtractions(bladeGroup, writer):
-    for blade in bladeGroup.iter():
-        structName = typePrefix+blade.name()
-        for partnerBlade in bladeGroup.iter():
-            sumBlade = blade+partnerBlade
-            sumName = typePrefix+sumBlade.name()
-            writer.write("constexpr %s %s::operator - (const %s& r){"%(sumName, structName, typePrefix+partnerBlade.name()))
+def generateCpp_Subtractions(group, writer):
+    for multivectorTypeA in group.iterMultivectorTypes():
+        multivectorA = multivectorTypeA.generateMultivector("v%blade%[%bladeElement%]")
+        typeNameA = typePrefix+multivectorTypeA.name()
+        for multivectorTypeB in group.iterMultivectorTypes():
+            multivectorB = multivectorTypeB.generateMultivector("other.v%blade%[%bladeElement%]")
+            typeNameB = typePrefix+multivectorTypeB.name()
+
+            diff = multivectorA - multivectorB
+            diffType = diff.getMultivectorType()
+            diffTypeName = typePrefix+diffType.name()
+            diffCalc = ", ".join([str(diff.getCoefficient(i)) for i in diffType.iterElements()])
+
+            writer.write("constexpr %s %s::operator - (const %s& other){"%(diffTypeName, typeNameA, typeNameB))
             writer.indent(CPP_INDENT)
-            def sum():
-                for index in range(bladeGroup.bladeCount):
-                    if blade.hasBlade(index):
-                        if partnerBlade.hasBlade(index):
-                            yield ", ".join(["v%i[%i]-r.v%i[%i]"%(index, e, index, e) for e in range(bladeGroup.bladeLengths[index])])
-                        else:
-                            yield ", ".join(["v%i[%i]"%(index, e) for e in range(bladeGroup.bladeLengths[index])])
-                    else:
-                        if partnerBlade.hasBlade(index):
-                            yield ", ".join(["-r.v%i[%i]"%(index, e) for e in range(bladeGroup.bladeLengths[index])])
-                        else:
-                            if sumBlade.hasBlade(index):
-                                yield ", ".join("0" for e in range(bladeGroup.bladeLengths[index]))
-            writer.write("return %s(%s);"%(sumName, ", ".join(s for s in sum())))
+            writer.write("return %s(%s);"%(diffTypeName, diffCalc))
             writer.unindent()
             writer.write("}")
     return
 
-def generateCpp_Additions(bladeGroup, writer):
-    for blade in bladeGroup.iter():
-        structName = typePrefix+blade.name()
-        for partnerBlade in bladeGroup.iter():
-            sumBlade = blade+partnerBlade
-            sumName = typePrefix+sumBlade.name()
-            writer.write("constexpr %s %s::operator + (const %s& r){"%(sumName, structName, typePrefix+partnerBlade.name()))
+def generateCpp_Additions(group, writer):
+    for multivectorTypeA in group.iterMultivectorTypes():
+        multivectorA = multivectorTypeA.generateMultivector("v%blade%[%bladeElement%]")
+        typeNameA = typePrefix+multivectorTypeA.name()
+        for multivectorTypeB in group.iterMultivectorTypes():
+            multivectorB = multivectorTypeB.generateMultivector("other.v%blade%[%bladeElement%]")
+            typeNameB = typePrefix+multivectorTypeB.name()
+            sum = multivectorA + multivectorB
+            sumType = sum.getMultivectorType()
+            sumTypeName = typePrefix+sumType.name()
+            sumCalc = ", ".join([str(sum.getCoefficient(i)) for i in sumType.iterElements()])
+            writer.write("constexpr %s %s::operator + (const %s& other){"%(sumTypeName, typeNameA, typeNameB))
             writer.indent(CPP_INDENT)
-            def sum():
-                for index in range(bladeGroup.bladeCount):
-                    if blade.hasBlade(index):
-                        if partnerBlade.hasBlade(index):
-                            yield ", ".join(["v%i[%i]+r.v%i[%i]"%(index, e, index, e) for e in range(bladeGroup.bladeLengths[index])])
-                        else:
-                            yield ", ".join(["v%i[%i]"%(index, e) for e in range(bladeGroup.bladeLengths[index])])
-                    else:
-                        if partnerBlade.hasBlade(index):
-                            yield ", ".join(["r.v%i[%i]"%(index, e) for e in range(bladeGroup.bladeLengths[index])])
-                        else:
-                            if sumBlade.hasBlade(index):
-                                yield ", ".join("0" for e in range(bladeGroup.bladeLengths[index]))
-            writer.write("return %s(%s);"%(sumName, ", ".join(s for s in sum())))
+            writer.write("return %s(%s);"%(sumTypeName, sumCalc))
             writer.unindent()
             writer.write("}")
     return
 
-def generateCpp_Multiplications(bladeGroup, writer):
-    for blade in bladeGroup.iter():
-        structName = typePrefix+blade.name()
-        for partnerBlade in bladeGroup.iter():
-            mulBlade = blade*partnerBlade
-            mulName = typePrefix+mulBlade.name()
-            writer.write("constexpr %s %s::operator * (const %s& r){"%(mulName, structName, typePrefix+partnerBlade.name()))
+def generateCpp_Multiplications(group, writer):
+    for multivectorTypeA in group.iterMultivectorTypes():
+        multivectorA = multivectorTypeA.generateMultivector("v%blade%[%bladeElement%]")
+        typeNameA = typePrefix + multivectorTypeA.name()
+        for multivectorTypeB in group.iterMultivectorTypes():
+            multivectorB = multivectorTypeB.generateMultivector("other.v%blade%[%bladeElement%]")
+            product = multivectorA*multivectorB
+            productType = product.getMultivectorType()
+            productTypeName = typePrefix+productType.name()
+            typeNameB = typePrefix+multivectorTypeB.name()
+            writer.write("constexpr %s %s::operator * (const %s& other){"%(productTypeName, typeNameA, typeNameB))
             writer.indent(CPP_INDENT)
-            def mul():
-                for index in mulBlade.iterActive():
-                    for element in range(bladeGroup.bladeLengths[index]):
-                        list = bladeGroup.pullingMultiply[index, element]
-                        if len(list)==0:
-                            yield "0"
-                        else:
-                            def valid(index1, index2):
-                                return blade.hasBlade(index1) and partnerBlade.hasBlade(index2)
-                            r= " + ".join(["%sv%i[%i]*r.v%i[%i]"%("" if factor==1 else str(factor)+"*", index1, element1, index2, element2) for index1, element1, index2, element2, factor in list if valid(index1, index2)])
-                            yield (r if r!="" else "0")
-            writer.write("return %s(%s);"%(mulName, ", ".join(m for m in mul())))
+            productCalc = ", ".join([str(product.getCoefficient(i)) for i in productType.iterElements()])
+            writer.write("  return %s(%s);"%(productTypeName, productCalc))
             writer.unindent()
             writer.write("}")
     return
 
-def generateCpp_ScalarMultiplication(bladeGroup, writer, settings):
-    for blade in bladeGroup.iter():
-        structName = typePrefix+blade.name()
-        writer.write("constexpr %s %s::operator * (const %s factor){"%(structName, structName, settings.cpp_type));
+def generateCpp_ScalarMultiplication(group, writer, settings):
+    for multivectorType in group.iterMultivectorTypes():
+        structName = typePrefix+multivectorType.name()
+        writer.write("constexpr %s %s::operator * (const %s factor){" % (structName, structName, settings.cpp_type));
         writer.indent(CPP_INDENT);
-        mulStr = ", ".join(["factor*v%i[%i]"%(i, e) for i, e in blade.iterElements()])
-        writer.write("return %s(%s);"%(structName, mulStr))
+        mulStr = ", ".join(["factor*v%i[%i]" % (i, e) for i, e in multivectorType.iterElements()])
+        writer.write("return %s(%s);" % (structName, mulStr))
         writer.unindent();
         writer.write("}")
-        writer.write("constexpr %s operator * (const %s factor, const %s& multivector){"%(structName, settings.cpp_type, structName))
+        writer.write("constexpr %s operator * (const %s factor, const %s& multivector){" % (
+        structName, settings.cpp_type, structName))
         writer.indent(CPP_INDENT);
         writer.write("return multivector*factor;")
         writer.unindent()
         writer.write("}")
-
-def generateElements(bladeGroup, writer):
-    for index in range(bladeGroup.bladeCount):
-        bladesType = bladeGroup.indexToBladesType(index)
-        bladesTypeName = bladesType.name()
-        bladeLength = bladeGroup.bladeLengths[index]
-        for element in range(bladeLength):
-            elementName = bladeGroup.elementStr(index, element)
-            initStr = ", ".join([("1" if e==element else "0") for e in range(bladeLength)])
-            writer.write("static const %s%s %s(%s);"%(typePrefix, bladesTypeName, elementName, initStr))
     return
 
-def generateMirror(bladeGroup, writer):
+def generateElements(group, writer):
+    for multivectorType in group.iterMultivectorTypes():
+        if multivectorType.length()==1:
+            typeName = typePrefix + multivectorType.name()
+            for blade, bladeElement in multivectorType.iterElements():
+                elementName = group.elementStr(blade, bladeElement)
+                initStr = ", ".join([("1" if e == bladeElement else "0") for b, e in multivectorType.iterElements()])
+                writer.write("static const %s %s(%s);" % (typeName, elementName, initStr))
     return
+
+def generateOperations(group, writer, settings):
+    if not settings.operationScript:
+        return
 
 def generateCpp(settings):
-    bladeGroup = blades.BladeGroup(settings.elementCount, settings.metric, settings.bladeScript)
+    cliffordGroup = clifford.Group(settings.elementCount, settings.metric, settings.bladeScript)
+
     with CPPWriter(settings.cpp_header) as writer:
         writer.write("#include <string>")
         writer.write("#include <sstream>")
@@ -272,15 +274,17 @@ def generateCpp(settings):
         writer.write("#include <limits>")
         writer.write("static const %s epsilon = std::numeric_limits<%s>::epsilon();"%(settings.cpp_type, settings.cpp_type));
         with CPPNamespace(writer, settings.cpp_namespace):
-            generateCpp_Blades(bladeGroup, settings, writer)
-            generateCpp_ForwardDeclarations(bladeGroup, writer)
-            generateCpp_Classes(bladeGroup, writer)
-            generateCpp_Subtractions(bladeGroup, writer)
-            generateCpp_Additions(bladeGroup, writer)
-            generateCpp_Multiplications(bladeGroup, writer)
-            generateCpp_ApproxEqual(bladeGroup, writer)
-            generateCpp_ScalarMultiplication(bladeGroup, writer, settings)
-            generateElements(bladeGroup, writer)
+            generateCpp_Blades(cliffordGroup, settings, writer)
+            generateCpp_ForwardDeclarations(cliffordGroup, writer)
+            generateCpp_Classes(cliffordGroup, writer)
+            generateCpp_Subtractions(cliffordGroup, writer)
+            generateCpp_Additions(cliffordGroup, writer)
+            generateCpp_Multiplications(cliffordGroup, writer)
+            generateCpp_ApproxEqual(cliffordGroup, writer)
+            generateCpp_ScalarMultiplication(cliffordGroup, writer, settings)
+            generateElements(cliffordGroup, writer)
+            generateOperations(cliffordGroup, writer, settings)
+    return
 
 try:
     settings = argumentparser.parseArguments()

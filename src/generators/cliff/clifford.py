@@ -18,114 +18,162 @@
 #
 
 import copy
+import sympy
 
-class BladesType:
-    def __init__(self, group, indicies, default=False):
+class Multivector:
+    def __init__(self, group, coefficients):
         self.group = group
-        self.fullIndicies = copy.copy(indicies)
-        self.indicies = self.fullIndicies
-        if default:
-            return
-        # Iterate over the possible indicies and find the optimal one
-        minimumDistance = self.group.bladeCount+1
-        minimumBlade = None
-        for blade in self.group.iter():
-            if self.compatibleWith(blade):
-                distance = self.distanceTo(blade)
-                if distance<minimumDistance:
-                    minimumBlade = blade
-                    minimumDistance = distance
-        if not minimumBlade:
-            raise Exception("There is no compatible blade available")
-        self.indicies = minimumBlade.indicies
+        self.coefficients = {}
+        for key, coefficient in coefficients.items():
+            if coefficients!=0:
+                self.coefficients[key] = coefficient
         return
+
+    def __add__(self, other):
+        addCoefficients = copy.copy(self.coefficients)
+        for key, coefficient in other.coefficients.items():
+            if key in addCoefficients:
+                addCoefficients[key] += coefficient
+            else:
+                addCoefficients[key] = coefficient
+        return Multivector(self.group, addCoefficients)
+
+    def __sub__(self, other):
+        subCoefficients = copy.copy(self.coefficients)
+        for key, coefficient in other.coefficients.items():
+            if key in subCoefficients:
+                subCoefficients[key] -= coefficient
+            else:
+                subCoefficients[key] = -coefficient
+        return Multivector(self.group, subCoefficients)
+
+    def __mul__(self, other):
+        mulCoefficients = {}
+        for keyA, coefficientA in self.coefficients.items():
+            for keyB, coefficientB in other.coefficients.items():
+                bladeA, bladeElementA = keyA
+                bladeB, bladeElementB = keyB
+                factor, targetBlade, targetBladeElement = self.group.multiplicationMap[(bladeA, bladeElementA, bladeB, bladeElementB)]
+                targetKey = (targetBlade, targetBladeElement)
+                adding = factor*coefficientA*coefficientB
+                if targetKey in mulCoefficients:
+                    mulCoefficients[targetKey] += adding
+                else:
+                    mulCoefficients[targetKey] = adding
+        return Multivector(self.group, mulCoefficients)
+
+    def getCoefficient(self, key):
+        return self.coefficients[key] if key in self.coefficients else 0
+
+    def getNecesaryBlades(self):
+        necessaryBlades=[False for i in range(self.group.bladeCount)]
+        for key in self.coefficients:
+            blade, bladeElement = key
+            if key in self.coefficients:
+                necessaryBlades[blade] = True
+        return necessaryBlades
+
+    def __str__(self):
+        def strElements():
+            for blade in range(self.group.bladeCount):
+                for bladeElement in range(self.group.bladeLengths[blade]):
+                    key = blade, bladeElement
+                    if key in self.coefficients:
+                        yield str("%s*%s"%(self.coefficients[key], self.group.elementStr(blade, bladeElement)))
+        return " + ".join(strElements())
+
+    def getMultivectorType(self):
+        necessaryBlades = self.getNecesaryBlades()
+
+        # Iterate over the possible indicies and find the optimal one
+        minimumDistance = self.group.bladeCount + 1
+        minimumType = None
+        for multivectorType in self.group.iterMultivectorTypes():
+            if multivectorType.compatibleWith(necessaryBlades):
+                distance = multivectorType.distanceTo(necessaryBlades)
+                if distance < minimumDistance:
+                    minimumType = multivectorType
+                    minimumDistance = distance
+        if not minimumType:
+            raise Exception("There is no compatible blade available")
+        return minimumType
+
+class MultivectorType:
+    def __init__(self, group, enabledBlades):
+        self.group = group
+        self.enabledBlades = copy.copy(enabledBlades)
+        return
+
+    def __add__(self, other):
+        enabledBlades = copy.copy(self.enabledBlades)
+        for pos, enabled in enumerate(other.enabledBlades):
+            enabledBlades[pos]=enabled
+        return MultivectorType(enabledBlades)
 
     def length(self):
         count=0
-        for i in self.indicies:
+        for i in self.enabledBlades:
             if i:
                 count+=1
         return count
 
-    def distanceTo(self, other):
+    def distanceTo(self, necessaryBlades):
         distance = 0
         for i in range(self.group.bladeCount):
-            if self.indicies[i]!=other.indicies[i]:
+            if self.enabledBlades[i]!=necessaryBlades[i]:
                 distance+=1
         return distance
 
-    def compatibleWith(self, other):
+    def compatibleWith(self, necessaryBlades):
         for i in range(self.group.bladeCount):
-            if self.indicies[i] and not other.indicies[i]:
+            if necessaryBlades[i] and not self.enabledBlades[i]:
                 return False
         return True
 
     def equal(self, other):
         for i in range(self.group.bladeCount):
-            if (self.indicies[i]!=other.indicies[i]):
+            if (self.enabledBlades[i]!=other.enabledBlades[i]):
                 return False
         return True
 
-    def hasBlade(self, index):
-        return self.indicies[index]==True
-
-    def __add__(self, other):
-        assert(self.group==other.group)
-        bladeCount = self.group.bladeCount
-        # Trivial, if a target index is in either source, its active
-        return BladesType(self.group, [self.indicies[index] or other.indicies[index] for index in range(bladeCount)])
-
-    def __mul__(self, other):
-        assert(self.group==other.group)
-
-        bladeCount = self.group.bladeCount
-        blade = [False for x in range(bladeCount)]
-
-        # Return a Blades class containing all possible blade indicies of a multiplication with a target type
-        # The touchMultiply provided by the Group has all the necessary information
-        for aBladeIndex, a in enumerate(self.indicies):
-            for bBladeIndex, b in enumerate(other.indicies):
-                if a and b:
-                    pairBladeIndex = (aBladeIndex, bBladeIndex)
-                    if pairBladeIndex in self.group.touchMultiply:
-                        for targetBladeIndex in self.group.touchMultiply[pairBladeIndex]:
-                            blade[targetBladeIndex] = True
-
-        return BladesType(self.group, blade)
-
-    # Return a list of all blades which would be active if all blade combinations would be enabled
-    def iterFull(self):
-        for index, active in enumerate(self.fullIndicies):
-            if active:
-                yield index
-
     # Return a list of all "active" blades of this type
-    def iterActive(self):
-        for index, active in enumerate(self.indicies):
+    def iterEnabled(self):
+        for index, active in enumerate(self.enabledBlades):
             if active:
                 yield index
 
     # Helper which also yields the elements for each active blade
     def iterElements(self):
-        for index, active in enumerate(self.indicies):
+        for index, active in enumerate(self.enabledBlades):
             if active:
                 for pos in range(self.group.bladeLengths[index]):
                     yield index, pos
 
+    def generateMultivector(self, coefficientMask):
+        coefficients = {}
+        for blade in range(self.group.bladeCount):
+            if self.enabledBlades[blade]:
+                for bladeElement in range(self.group.bladeLengths[blade]):
+                    symbolString = coefficientMask.replace("%blade%", str(blade))\
+                                                  .replace("%bladeElement%", str(bladeElement))
+                    coefficient = sympy.symbols(symbolString)
+                    coefficients[(blade, bladeElement)] = coefficient
+        return Multivector(self.group, coefficients)
+
     # The name simply is a boolean (T and F) string where T is used for all active blades
     def name(self):
-        return "".join(["T" if x else "F" for x in self.indicies])
+        return "".join(["T" if x else "F" for x in self.enabledBlades])
 
     def __str__(self):
-        return "Blade:"+str(self.indicies)
+        return "Blade:"+str(self.enabledBlades)
 
-class BladeGroup:
+class Group:
     def __init__(self, elementCount, metric, bladeScript):
-
         self.elementCount = elementCount
         self.metric = metric
         self.bladeCount = elementCount+1
         self.elements = []
+        self.multiplicationMap = {}
         self.bladeLengths = []
         for index in range(self.bladeCount):
             l=[e for e in self.__generateElements(index, 0, [])]
@@ -166,51 +214,39 @@ class BladeGroup:
         def hasBladesType(bladesType):
             for blades in bladesSet:
                 if blades.equal(bladesType):
-                    print("Has ", bladesType)
                     return True
             return False
 
         def addBladesType(bladesType):
             if not hasBladesType(bladesType):
-                print("Add:", bladesType)
                 bladesSet.append(bladesType)
 
         def enableBladesTypeOfLength(len):
             for indicies in self.__iterPossibleIndiciesOfLenth(len):
-                addBladesType(BladesType(self, indicies, True))
+                addBladesType(MultivectorType(self, indicies))
 
         def enableBladesType(indicies):
-            addBladesType(BladesType(self, indicies, True))
+            addBladesType(MultivectorType(self, indicies))
 
-        env = {"enableBladesTypeOfLength":enableBladesTypeOfLength,
-               "enableBladesType":enableBladesType}
+        env = {"enableMultivectorTypesOfLength":enableBladesTypeOfLength,
+               "enableMultivectorType":enableBladesType}
         exec(obj, env)
-        self.blades = [BladesType(self, blade, True) for blade in self.__iterPossibleIndicies() if hasBladesType(BladesType(self, blade, True))]
-        print([str(b) for b in self.blades])
-        print([str(b) for b in bladesSet])
+        addBladesType(MultivectorType(self, [True for i in range(self.bladeCount)]))
+        self.multivectorTypes = [MultivectorType(self, blade) for blade in self.__iterPossibleIndicies() if hasBladesType(MultivectorType(self, blade))]
         return
 
     def __defaultBlades(self):
-        self.blades = [BladesType(self, blade, True) for blade in self.__iterPossibleIndicies()]
+        self.multivectorTypes= [MultivectorType(self, blade) for blade in self.__iterPossibleIndicies()]
         return
 
-    # Executed during initialization it calculates the inverse multiplication coefficients (pullingMultiply) and
-    # the touched multiplication (e.g. wether or not a product of blades will produce a target blade).
     def __buildMultiply(self):
-
-        # Calculates the element id of an elementList, which is of course specific to a blade
-        # elementList must be sorted.
-        def getElement(bladeIndex, elementList):
+        def getElement(blade, elementList):
             elementSet = set(elementList)
-            for eid, elist in enumerate(self.elements[index]):
+            for eid, elist in enumerate(self.elements[blade]):
                 if len(elementSet & set(elist))==len(elementList):
                     return eid
             raise Exception("Failed to retrieve element id.")
 
-        # Multiply two lists of elements and return a target element list and the factor of the multiplication
-        # Input lists must be sorted, output lists are sorted.
-        # The complication is from the fact, that the product of non identical elements has to account
-        # for the asymmetry of the wedge product.
         def multiply(list1, list2):
             if len(list1)==0:
                 return list2, 1
@@ -244,12 +280,6 @@ class BladeGroup:
             result+=list2[pos2:]
             return result, factor
 
-        self.pullingMultiply = {}
-        self.touchMultiply = {}
-        # Initialize the pullingMultiply lists
-        for index in range(self.bladeCount):
-            for element in range(self.bladeLengths[index]):
-                self.pullingMultiply[(index, element)] = []
         for index1 in range(self.bladeCount):
             for elementsId1 in range(self.bladeLengths[index1]):
                 for index2 in range(self.bladeCount):
@@ -257,20 +287,9 @@ class BladeGroup:
                         elements1 = self.elements[index1][elementsId1]
                         elements2 = self.elements[index2][elementsId2]
                         productElements, factor = multiply(elements1, elements2)
-                        if factor!=0:
-                            targetBladeIndex = len(productElements)
-                            targetElementsId = getElement(index, productElements)
-                            self.pullingMultiply[(targetBladeIndex, targetElementsId)].append((index1, elementsId1, index2, elementsId2, factor))
-                            indexpair = (index1, index2)
-                            if indexpair not in self.touchMultiply:
-                                self.touchMultiply[indexpair] = {}
-                            self.touchMultiply[indexpair][targetBladeIndex] = True
+                        targetElementsId = getElement(len(productElements), productElements)
+                        self.multiplicationMap[(index1, elementsId1, index2, elementsId2)]=(factor, len(productElements), targetElementsId)
         return
-
-    def indexToBladesType(self, index):
-        active = [False for i in range(self.bladeCount)]
-        active[index]=True
-        return BladesType(self, active)
 
     def elementStr(self, index, element):
         return "e"+"".join(str(i+1) for i in self.elements[index][element])
@@ -282,6 +301,5 @@ class BladeGroup:
             for x in range(start, self.elementCount):
                 yield from self.__generateElements(index-1, x+1, elements+[x])
 
-    # Iterate over all possible BladesTypes
-    def iter(self):
-        yield from self.blades
+    def iterMultivectorTypes(self):
+        yield from self.multivectorTypes
