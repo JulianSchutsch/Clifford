@@ -132,13 +132,13 @@ def generateCpp_Classes(group, writer):
     for multivectorType in group.iterMultivectorTypes():
         typeName = typePrefix + multivectorType.name()
         with CPPStruct(writer, typeName, asClass=True) as struct:
+            struct.public()
             for index in multivectorType.iterEnabled():
                 writer.write("Blade%i v%i;"%(index, index))
             for friendVectorType in group.iterMultivectorTypes():
                 if not multivectorType.equal(friendVectorType):
                     friendVectorName = typePrefix + friendVectorType.name()
                     writer.write("friend class %s;"%friendVectorName)
-            struct.public()
             generateFunc_Str(multivectorType)
             generateFunc_HasBlade(multivectorType)
             writer.write("constexpr %s operator * (const %s factor);" % (typeName, settings.cpp_type));
@@ -261,8 +261,54 @@ def generateElements(group, writer):
     return
 
 def generateOperations(group, writer, settings):
+    currentOperands = None
+
     if not settings.operationScript:
         return
+
+    with open(settings.operationScript, "r") as file:
+        obj = compile(file.read(), settings.operationScript, 'exec')
+
+    def addFunction(functionName, calculation):
+        global currentOperands
+        calculation = calculation.simplify()
+        calculationType = calculation.getMultivectorType()
+        calculationTypeName = typePrefix + calculationType.name()
+        operandStr = ", ".join(["%s operand%i"%(typePrefix+m.name(), i) for i, m in enumerate(currentOperands)])
+        functionCalc = ", ".join([str(calculation.getCoefficient(i)) for i in calculationType.iterElements()])
+        writer.write("%s %s(%s){"%(calculationTypeName, functionName, operandStr))
+        writer.indent(CPP_INDENT)
+        writer.write("return %s(%s);"%(calculationTypeName, functionCalc))
+        writer.unindent()
+        writer.write("}")
+        return
+
+    def operands(*multivectorTypes):
+        global currentOperands
+        currentOperands = multivectorTypes
+        result = []
+        for index, multivectorType in enumerate(list(multivectorTypes)):
+            result.append(multivectorType.generateMultivector("operand%i%s"%(index, ".v%blade%[%bladeElement%]")))
+        return tuple(result)
+
+    env = {"addFunction":addFunction,
+           "operands":operands}
+
+    class Operand:
+        def __init__(self, index):
+            self.index = index
+
+    for multivectorType in group.iterMultivectorTypes():
+        if multivectorType.length()==1:
+            for blade in multivectorType.iterEnabled():
+                env["blade%i"%blade] = multivectorType
+
+    for i in range(1, 11):
+        env["operand%i"%i] = Operand(i)
+
+    exec(obj, env)
+
+    return
 
 def generateCpp(settings):
     cliffordGroup = clifford.Group(settings.elementCount, settings.metric, settings.bladeScript)

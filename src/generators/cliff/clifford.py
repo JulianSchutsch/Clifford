@@ -25,9 +25,23 @@ class Multivector:
         self.group = group
         self.coefficients = {}
         for key, coefficient in coefficients.items():
-            if coefficients!=0:
+            if coefficient!=0:
                 self.coefficients[key] = coefficient
         return
+
+    def simplify(self):
+        def applySimplification(coefficient, key):
+            print("S("+str(key)+"):", coefficient, "->", sympy.simplify(coefficient))
+            return sympy.simplify(coefficient)
+        coefficients = {key:applySimplification(c, key) for key, c in self.coefficients.items()}
+        return Multivector(self.group, coefficients)
+
+    def conjugate(self):
+        coefficients = {}
+        for key, coefficient in self.coefficients.items():
+            blade, bladeElement = key
+            coefficients[key]=(-1)**(blade*(blade-1))*coefficient
+        return Multivector(self.group, coefficients)
 
     def __add__(self, other):
         addCoefficients = copy.copy(self.coefficients)
@@ -107,8 +121,8 @@ class MultivectorType:
     def __add__(self, other):
         enabledBlades = copy.copy(self.enabledBlades)
         for pos, enabled in enumerate(other.enabledBlades):
-            enabledBlades[pos]=enabled
-        return MultivectorType(enabledBlades)
+            enabledBlades[pos]=enabledBlades[pos] or enabled
+        return MultivectorType(self.group, enabledBlades)
 
     def length(self):
         count=0

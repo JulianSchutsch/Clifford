@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8)
 
 add_custom_command(OUTPUT "include/cliff/c3_0.hpp"
                    PRE_BUILD
-                   COMMAND python3 src/generators/cliff/cliff_generator.py 3 --cpp --cpp_header=include/cliff/c3_0.hpp --cpp_type=double --cpp_namespace=cliff --bladescript=scripts/c3_0_blades.py)
+                   COMMAND python3 src/generators/cliff/cliff_generator.py 3 --cpp --cpp_header=include/cliff/c3_0.hpp --cpp_type=double --cpp_namespace=cliff --bladescript=scripts/c3_0_blades.py --operationscript=scripts/c_operations.py)
 
 project(testcliff)
 
